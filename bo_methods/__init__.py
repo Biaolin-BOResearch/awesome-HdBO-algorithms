@@ -26,7 +26,19 @@ from .bounce import Bounce
 from .lsbo import LSBO
 from .mgp import MGP
 
-__version__ = "1.3.0"
+# Robust GP methods for high dimensions
+from .robust_gp_bo import RobustGPBO
+
+# Coordinate-wise optimization methods
+from .eci_bo import ECIBO, ECIBOMaximize
+
+# Adaptive line search methods
+from .als_bo import ALSBO, ALSBOMaximize
+
+# Subspace selection methods
+from .essi_bo import ESSIBO, ESSIBOMaximize
+
+__version__ = "1.7.0"
 __all__ = [
     "StandardBO",
     "TuRBO",
@@ -48,4 +60,15 @@ __all__ = [
     "LSBO",
     # Hyperparameter marginalization methods
     "MGP",
+    # Robust GP methods for high dimensions
+    "RobustGPBO",
+    # Coordinate-wise optimization methods
+    "ECIBO",
+    "ECIBOMaximize",
+    # Adaptive line search methods
+    "ALSBO",
+    "ALSBOMaximize",
+    # Subspace selection methods
+    "ESSIBO",
+    "ESSIBOMaximize",
 ]
