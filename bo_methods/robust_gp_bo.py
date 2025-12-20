@@ -37,6 +37,8 @@ from gpytorch.constraints import GreaterThan, Interval
 from gpytorch.likelihoods import GaussianLikelihood
 
 from botorch.models import SingleTaskGP
+from botorch.models.transforms.input import Normalize
+from botorch.models.transforms.outcome import Standardize
 from botorch.fit import fit_gpytorch_mll
 from botorch.acquisition import (
     ExpectedImprovement,
@@ -197,9 +199,13 @@ class RobustGPBO(BaseOptimizer):
 
         return covar_module
 
-    def _create_model(self) -> SingleTaskGP:
+    def _create_model(self, X_norm, y_std) -> SingleTaskGP:
         """
         Create a GP model with robust initialization.
+
+        Args:
+            X_norm: Normalized training inputs in [0,1]^d
+            y_std: Standardized training outputs
 
         Returns:
             A SingleTaskGP model with Matérn kernel and √d initialization
@@ -207,16 +213,26 @@ class RobustGPBO(BaseOptimizer):
         covar_module = self._create_covar_module()
 
         model = SingleTaskGP(
-            train_X=self.X,
-            train_Y=self.y,
+            train_X=X_norm,
+            train_Y=y_std,
             covar_module=covar_module,
+            input_transform=None,
+            outcome_transform=None,
         )
 
         return model
 
     def _fit_model(self):
-        """Fit the GP model to the observed data."""
-        self.model = self._create_model().to(device=self.device, dtype=self.dtype)
+        """Fit the GP model to the observed data in normalized space."""
+        # Update statistics and normalize/standardize data
+        self._update_y_statistics()
+        self._train_X_normalized = self._normalize_X(self.train_X)
+        self._train_y_standardized = self._standardize_y(self.train_y)
+        
+        self.model = self._create_model(
+            self._train_X_normalized, 
+            self._train_y_standardized
+        ).to(device=self.device, dtype=self.dtype)
         self.mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
         fit_gpytorch_mll(self.mll)
 
@@ -236,16 +252,19 @@ class RobustGPBO(BaseOptimizer):
         # Fit the model
         self._fit_model()
 
+        # Use standardized best_f since model is trained on standardized data
+        best_f_std = self._train_y_standardized.max().item()
+
         # Create acquisition function
         if self.acq_func_name == "EI":
             acq_func = ExpectedImprovement(
                 model=self.model,
-                best_f=self.y.max().item(),
+                best_f=best_f_std,
             )
         elif self.acq_func_name == "LogEI":
             acq_func = LogExpectedImprovement(
                 model=self.model,
-                best_f=self.y.max().item(),
+                best_f=best_f_std,
             )
         elif self.acq_func_name == "UCB":
             acq_func = UpperConfidenceBound(
@@ -255,14 +274,17 @@ class RobustGPBO(BaseOptimizer):
         else:
             raise ValueError(f"Unknown acquisition function: {self.acq_func_name}")
 
-        # Optimize acquisition function
-        candidates, _ = optimize_acqf(
+        # Optimize acquisition function in normalized space [0,1]^d
+        candidates_norm, _ = optimize_acqf(
             acq_function=acq_func,
-            bounds=self.bounds,
+            bounds=self.unit_bounds,
             q=n_suggestions,
             num_restarts=10,
             raw_samples=1000,
         )
+
+        # Denormalize to original space
+        candidates = self._denormalize_X(candidates_norm)
 
         return candidates
 
@@ -280,12 +302,17 @@ class RobustGPBO(BaseOptimizer):
         if y.dim() == 1:
             y = y.unsqueeze(-1)
 
+        # Store in both self.X/self.y (for this class) and train_X/train_y (for base class)
         if self.X is None:
             self.X = X
             self.y = y
         else:
             self.X = torch.cat([self.X, X], dim=0)
             self.y = torch.cat([self.y, y], dim=0)
+        
+        # Also update base class attributes for proper standardization
+        self.train_X = self.X
+        self.train_y = self.y
 
     def get_best_point(self) -> Tuple[Tensor, Tensor]:
         """

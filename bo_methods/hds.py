@@ -15,6 +15,7 @@ from torch import Tensor
 import numpy as np
 
 from botorch.models import SingleTaskGP
+from botorch.models.transforms.input import Normalize
 from botorch.fit import fit_gpytorch_mll
 from botorch.acquisition import ExpectedImprovement
 from botorch.optim import optimize_acqf
@@ -232,10 +233,20 @@ class HDS(BaseOptimizer):
         """
         dim_list = sorted(list(node_dims))
         X_proj = self.X[:, dim_list]
+        proj_bounds = torch.stack([self.bounds[0, dim_list], self.bounds[1, dim_list]])
+
+        # Standardize outputs manually
+        y_mean = self.y.mean()
+        y_std = self.y.std()
+        if y_std < 1e-6:
+            y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        y_stdized = (self.y - y_mean) / y_std
 
         model = SingleTaskGP(
             train_X=X_proj,
-            train_Y=self.y
+            train_Y=y_stdized,
+            input_transform=Normalize(d=len(dim_list), bounds=proj_bounds),
+            outcome_transform=None,
         ).to(device=self.device, dtype=self.dtype)
 
         mll = ExactMarginalLogLikelihood(model.likelihood, model)
@@ -351,9 +362,18 @@ class HDS(BaseOptimizer):
         all_candidates = torch.cat(all_candidates, dim=0)
 
         # Fit full model to rank candidates
+        # Standardize outputs manually for full model
+        y_mean = self.y.mean()
+        y_std = self.y.std()
+        if y_std < 1e-6:
+            y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        y_stdized = (self.y - y_mean) / y_std
+
         full_model = SingleTaskGP(
             train_X=self.X,
-            train_Y=self.y
+            train_Y=y_stdized,
+            input_transform=Normalize(d=self.input_dim, bounds=self.bounds),
+            outcome_transform=None,
         ).to(device=self.device, dtype=self.dtype)
 
         mll = ExactMarginalLogLikelihood(full_model.likelihood, full_model)

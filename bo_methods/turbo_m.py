@@ -168,7 +168,7 @@ class TurboM(BaseOptimizer):
             # Add to training data
             self.train_X = torch.cat([self.train_X, x_new], dim=0)
             self.train_y = torch.cat([self.train_y, y_new], dim=0)
-            self.tr_indices = torch.cat([self.tr_indices, torch.tensor([tr_idx], device=self.device)])
+            self.tr_indices = torch.cat([self.tr_indices, torch.tensor([tr_idx], dtype=torch.long, device=self.device)])
             self.n_evals += 1
 
             # Adjust trust region if initialization is done

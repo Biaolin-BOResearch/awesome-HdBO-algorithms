@@ -38,7 +38,12 @@ from .als_bo import ALSBO, ALSBOMaximize
 # Subspace selection methods
 from .essi_bo import ESSIBO, ESSIBOMaximize
 
-__version__ = "1.7.0"
+# Variable selection methods
+from .vsbo import VSBO
+from .mcts_vs import MCTSVS
+from .lasso_bo import LassoBO
+
+__version__ = "1.8.0"
 __all__ = [
     "StandardBO",
     "TuRBO",
@@ -71,4 +76,8 @@ __all__ = [
     # Subspace selection methods
     "ESSIBO",
     "ESSIBOMaximize",
+    # Variable selection methods
+    "VSBO",
+    "MCTSVS",
+    "LassoBO",
 ]

@@ -143,10 +143,17 @@ class ALSBO(BaseOptimizer):
         """Fit GP model to current data."""
         covar_module = self._create_covar_module()
 
+        # Normalize data for GP
+        X_norm = self._normalize_X(self.X)
+        self._update_y_statistics()
+        y_std = self._standardize_y(self.y)
+        
         self.model = SingleTaskGP(
-            train_X=self.X,
-            train_Y=self.y,
+            train_X=X_norm,
+            train_Y=y_std,
             covar_module=covar_module,
+            input_transform=None,
+            outcome_transform=None,
         ).to(device=self.device, dtype=self.dtype)
 
         self.mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
@@ -362,6 +369,10 @@ class ALSBO(BaseOptimizer):
             self.X = torch.cat([self.X, X], dim=0)
             self.y = torch.cat([self.y, y], dim=0)
 
+        # Also update base class attributes for proper standardization
+        self.train_X = self.X
+        self.train_y = self.y
+
         # Update best solution (for minimization)
         best_idx = self.y.argmin()
         self.x_best = self.X[best_idx].clone()
@@ -508,6 +519,10 @@ class ALSBOMaximize(ALSBO):
         else:
             self.X = torch.cat([self.X, X], dim=0)
             self.y = torch.cat([self.y, y], dim=0)
+
+        # Also update base class attributes for proper standardization
+        self.train_X = self.X
+        self.train_y = self.y
 
         # Update best solution (for maximization)
         best_idx = self.y.argmax()

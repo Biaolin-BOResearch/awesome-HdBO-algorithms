@@ -15,6 +15,8 @@ from typing import Optional, Tuple, Callable
 from torch import Tensor
 
 from botorch.models import SingleTaskGP
+from botorch.models.transforms.outcome import Standardize
+from botorch.models.transforms.input import Normalize
 from botorch.fit import fit_gpytorch_mll
 from botorch.acquisition import ExpectedImprovement
 from botorch.optim import optimize_acqf
@@ -262,17 +264,26 @@ class LSBO(BaseOptimizer):
         # Encode observations to latent space
         Z = self._encode_to_latent(self.X)
 
-        # Fit GP in latent space
+        # Update latent bounds before fitting model
+        self.latent_bounds = self._estimate_latent_bounds()
+
+        # Standardize outputs manually to avoid BoTorch input warnings
+        y_mean = self.y.mean()
+        y_std = self.y.std()
+        if y_std < 1e-6:
+            y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        y_stdized = (self.y - y_mean) / y_std
+
+        # Fit GP in latent space with transforms
         self.model = SingleTaskGP(
             train_X=Z,
-            train_Y=self.y
+            train_Y=y_stdized,
+            input_transform=Normalize(d=self.latent_dim, bounds=self.latent_bounds),
+            outcome_transform=None,
         ).to(device=self.device, dtype=self.dtype)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
         fit_gpytorch_mll(mll)
-
-        # Update latent bounds
-        self.latent_bounds = self._estimate_latent_bounds()
 
     def suggest(self, n_suggestions: int = 1) -> Tensor:
         """

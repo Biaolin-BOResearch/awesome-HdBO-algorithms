@@ -294,11 +294,23 @@ class MGP(BaseOptimizer):
         """Fit the GP model and compute hyperparameter uncertainty."""
         covar_module = self._create_covar_module()
 
+        # Normalize X to unit cube and standardize targets for stability
+        X_norm = self._normalize_X(self.train_X)
+
+        y_mean = self.train_y.mean()
+        y_std = self.train_y.std()
+        if y_std < 1e-6:
+            y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        y_stdized = (self.train_y - y_mean) / y_std
+
         self.model = MarginalGP(
-            train_X=self.train_X,
-            train_Y=self.train_y,
+            train_X=X_norm,
+            train_Y=y_stdized,
             covar_module=covar_module,
         ).to(device=self.device, dtype=self.dtype)
+
+        self._y_mean = y_mean
+        self._y_std = y_std
 
         self.mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
 
@@ -354,7 +366,8 @@ class MGP(BaseOptimizer):
         if self.model is None or self.train_X.shape[0] == 0:
             raise ValueError("No observations yet. Call observe() first.")
 
-        best_f = self.train_y.max().item()
+        # Best f in standardized space
+        best_f = ((self.train_y - self._y_mean) / self._y_std).max().item()
 
         # Create acquisition function with standard GP posterior
         # Note: The hyperparameter uncertainty is implicitly captured in
@@ -371,13 +384,16 @@ class MGP(BaseOptimizer):
             raise ValueError(f"Unknown acquisition function: {self.acq_func}")
 
         # Optimize acquisition function
-        candidates, _ = optimize_acqf(
+        candidates_norm, _ = optimize_acqf(
             acq_function=acq,
-            bounds=self.bounds,
+            bounds=self.unit_bounds,
             q=n_suggestions,
             num_restarts=10,
             raw_samples=512,
         )
+
+        # Denormalize to original bounds
+        candidates = self._denormalize_X(candidates_norm)
 
         return candidates
 

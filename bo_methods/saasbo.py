@@ -16,7 +16,6 @@ from typing import Optional
 import torch
 from botorch import fit_fully_bayesian_model_nuts
 from botorch.models.fully_bayesian import SaasFullyBayesianSingleTaskGP
-from botorch.models.transforms import Standardize
 from botorch.acquisition.logei import qLogExpectedImprovement
 from botorch.optim import optimize_acqf
 from gpytorch.module import Module
@@ -123,14 +122,17 @@ class SAASBO(BaseOptimizer):
         # Get qLogEI acquisition function
         acq_func = self._get_acquisition_function()
 
-        # Optimize acquisition function
-        candidates, _ = optimize_acqf(
+        # Optimize acquisition function in normalized space [0,1]^d
+        candidates_norm, _ = optimize_acqf(
             acq_func,
-            bounds=self.bounds,
+            bounds=self.unit_bounds,
             q=n_suggestions,
             num_restarts=num_restarts,
             raw_samples=raw_samples,
         )
+
+        # Denormalize to original space
+        candidates = self._denormalize_X(candidates_norm)
 
         assert candidates.shape == (n_suggestions, self.input_dim), \
             f"Expected shape ({n_suggestions}, {self.input_dim}), got {candidates.shape}"
@@ -179,12 +181,18 @@ class SAASBO(BaseOptimizer):
         using Hamiltonian Monte Carlo (NUTS) to draw samples from the posterior
         over hyperparameters.
         """
-        # Create SAAS model with outcome standardization
+        # Normalize X to unit cube and standardize y manually
+        self._train_X_normalized = self._normalize_X(self.train_X)
+        self._update_y_statistics()
+        self._train_y_standardized = self._standardize_y(self.train_y)
+
+        # Create SAAS model without additional transforms
         self.saas_model = SaasFullyBayesianSingleTaskGP(
-            train_X=self.train_X,
-            train_Y=self.train_y,
+            train_X=self._train_X_normalized,
+            train_Y=self._train_y_standardized,
             train_Yvar=None,  # Assume unknown/homoscedastic noise
-            outcome_transform=Standardize(m=1),  # Standardize outputs
+            outcome_transform=None,
+            input_transform=None,
         )
 
         # Fit using NUTS sampler
@@ -209,7 +217,8 @@ class SAASBO(BaseOptimizer):
         if self.saas_model is None:
             raise ValueError("Model not initialized. Call observe() first.")
 
-        best_f = self.train_y.max()
+        # Use standardized best_f since model is trained on standardized data
+        best_f = self._train_y_standardized.max()
 
         return qLogExpectedImprovement(
             model=self.saas_model,

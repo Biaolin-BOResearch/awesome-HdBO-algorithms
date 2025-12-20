@@ -15,6 +15,8 @@ from typing import Optional, Tuple, Set
 from torch import Tensor
 
 from botorch.models import SingleTaskGP
+from botorch.models.transforms.input import Normalize
+from botorch.models.transforms.outcome import Standardize
 from botorch.fit import fit_gpytorch_mll
 from botorch.acquisition import ExpectedImprovement
 from botorch.optim import optimize_acqf
@@ -251,11 +253,24 @@ class SOLID(BaseOptimizer):
             )
         )
 
+        # Standardize outputs manually to avoid BoTorch input warnings
+        y_mean = self.y.mean()
+        y_std = self.y.std()
+        if y_std < 1e-6:
+            y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        y_stdized = (self.y - y_mean) / y_std
+
         self.model = SingleTaskGP(
             train_X=self.X,
-            train_Y=self.y,
-            covar_module=covar_module
+            train_Y=y_stdized,
+            covar_module=covar_module,
+            input_transform=Normalize(d=self.input_dim, bounds=self.bounds),
+            outcome_transform=None,
         ).to(device=self.device, dtype=self.dtype)
+
+        # Save stats for potential post-processing
+        self._y_mean = y_mean
+        self._y_std = y_std
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
         fit_gpytorch_mll(mll)

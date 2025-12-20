@@ -13,6 +13,8 @@ from typing import Optional
 import torch
 from scipy.optimize import minimize
 from botorch.models import SingleTaskGP
+from botorch.models.transforms.outcome import Standardize
+from botorch.models.transforms.input import Normalize
 from botorch.fit import fit_gpytorch_mll
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from gpytorch.kernels import Kernel
@@ -332,6 +334,8 @@ class ALEBO(EmbeddingOptimizer):
 
         # Update training data
         X_low = X_low.reshape(-1, self.low_dim)
+        # Clamp to bounds to ensure data is within expected range for Normalize transform
+        X_low = torch.clamp(X_low, self.low_dim_bounds[0], self.low_dim_bounds[1])
         y = y.reshape(-1, 1)
 
         self.train_X_low = torch.cat([self.train_X_low, X_low], dim=0)
@@ -343,12 +347,31 @@ class ALEBO(EmbeddingOptimizer):
             B_pinv=self.embedding_matrix_pinv,
         ).to(self.device)
 
+        # Standardize Y: mean=0, std=1
+        self._y_mean = self.train_y.mean()
+        self._y_std = self.train_y.std()
+        if self._y_std < 1e-6:
+            self._y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        y_stdized = (self.train_y - self._y_mean) / self._y_std
+        self._train_y_standardized = y_stdized
+
+        # Normalize X_low from [-1,1] to [0,1] manually (避免 BoTorch 警告)
+        # low_dim_bounds is [-1, 1], so: X_norm = (X - (-1)) / (1 - (-1)) = (X + 1) / 2
+        X_low_normalized = (self.train_X_low - self.low_dim_bounds[0]) / (
+            self.low_dim_bounds[1] - self.low_dim_bounds[0]
+        )
+        # Store for acquisition optimization
+        self._train_X_low_normalized = X_low_normalized
+
         # Create and fit GP model with Mahalanobis kernel
+        # Now X is in [0,1]^d and Y is standardized, no transforms needed
         self.model = SingleTaskGP(
-            self.train_X_low,
-            self.train_y,
+            X_low_normalized,
+            y_stdized,
             covar_module=mahalanobis_kernel,
             mean_module=self.mean_module,
+            input_transform=None,
+            outcome_transform=None,
         ).to(self.device)
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
@@ -381,21 +404,29 @@ class ALEBO(EmbeddingOptimizer):
 
         for _ in range(n_suggestions):
             best_val = float('-inf')
-            best_candidate = None
+            best_candidate_norm = None
 
-            # Generate initial points via rejection sampling
+            # Generate initial points via rejection sampling (in original [-1,1] space)
             init_points = self._generate_initial_points_rejection(num_restarts)
+            # Normalize to [0,1] for optimization
+            init_points_norm = (init_points - self.low_dim_bounds[0]) / (
+                self.low_dim_bounds[1] - self.low_dim_bounds[0]
+            )
 
             for i in range(num_restarts):
-                y0 = init_points[i].cpu().numpy()
+                y0_norm = init_points_norm[i].cpu().numpy()
 
-                # Define constraint: -1 ≤ B^†y ≤ 1
+                # Define constraint: -1 ≤ B^†y ≤ 1 (y in original space)
                 B_pinv_np = self.embedding_matrix_pinv.T.cpu().numpy()
 
-                def constraint_lower(y):
+                def constraint_lower(y_norm):
+                    # Convert from [0,1] to [-1,1]: y = y_norm * 2 - 1
+                    y = y_norm * 2 - 1
                     return y @ B_pinv_np.T + 1  # Should be >= 0
 
-                def constraint_upper(y):
+                def constraint_upper(y_norm):
+                    # Convert from [0,1] to [-1,1]: y = y_norm * 2 - 1
+                    y = y_norm * 2 - 1
                     return 1 - y @ B_pinv_np.T  # Should be >= 0
 
                 constraints = [
@@ -403,12 +434,13 @@ class ALEBO(EmbeddingOptimizer):
                     {'type': 'ineq', 'fun': constraint_upper},
                 ]
 
-                # Also constrain y to be in reasonable range
-                bounds_scipy = [(-5, 5)] * self.low_dim
+                # Bounds in normalized space [0,1]
+                bounds_scipy = [(0, 1)] * self.low_dim
 
                 # Objective: negative acquisition (we minimize)
-                def objective(y):
-                    y_tensor = torch.tensor(y, device=self.device, dtype=self.dtype).reshape(1, -1)
+                # Input is in normalized [0,1] space, which is what the model expects
+                def objective(y_norm):
+                    y_tensor = torch.tensor(y_norm, device=self.device, dtype=self.dtype).reshape(1, -1)
                     with torch.no_grad():
                         val = acq_func(y_tensor.unsqueeze(0))  # Add q dimension
                     return -val.item()
@@ -416,7 +448,7 @@ class ALEBO(EmbeddingOptimizer):
                 try:
                     result = minimize(
                         objective,
-                        y0,
+                        y0_norm,
                         method='SLSQP',
                         bounds=bounds_scipy,
                         constraints=constraints,
@@ -425,16 +457,18 @@ class ALEBO(EmbeddingOptimizer):
 
                     if result.success and -result.fun > best_val:
                         best_val = -result.fun
-                        best_candidate = result.x
+                        best_candidate_norm = result.x
                 except Exception:
                     continue
 
-            if best_candidate is not None:
+            if best_candidate_norm is not None:
+                # Convert back from [0,1] to [-1,1] original space
+                best_candidate = best_candidate_norm * 2 - 1
                 best_candidates.append(
                     torch.tensor(best_candidate, device=self.device, dtype=self.dtype)
                 )
             else:
-                # Fallback: use random point
+                # Fallback: use random point (in original space)
                 best_candidates.append(init_points[0])
 
         return torch.stack(best_candidates)

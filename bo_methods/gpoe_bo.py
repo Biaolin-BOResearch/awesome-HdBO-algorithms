@@ -16,6 +16,7 @@ import torch
 import numpy as np
 import gpytorch
 from botorch.models import SingleTaskGP
+from botorch.models.transforms.input import Normalize
 from botorch.fit import fit_gpytorch_model
 from torch.quasirandom import SobolEngine
 from gpytorch.mlls import ExactMarginalLogLikelihood
@@ -220,7 +221,12 @@ class GPOEBO(BaseOptimizer):
         Returns:
             Fitted SingleTaskGP model
         """
-        model = SingleTaskGP(batched_X, batched_y)
+        model = SingleTaskGP(
+            batched_X,
+            batched_y,  # already standardized before call
+            input_transform=Normalize(d=self.input_dim, bounds=self.bounds),
+            outcome_transform=None,
+        )
         model.likelihood.noise_covar.register_constraint("raw_noise", GreaterThan(1e-5))
 
         mll = ExactMarginalLogLikelihood(model.likelihood, model)

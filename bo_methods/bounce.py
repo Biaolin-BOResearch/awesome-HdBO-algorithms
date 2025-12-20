@@ -16,6 +16,8 @@ from torch import Tensor
 import numpy as np
 
 from botorch.models import SingleTaskGP
+from botorch.models.transforms.outcome import Standardize
+from botorch.models.transforms.input import Normalize
 from botorch.fit import fit_gpytorch_mll
 from botorch.acquisition import ExpectedImprovement
 from botorch.optim import optimize_acqf
@@ -197,12 +199,25 @@ class Bounce(BaseOptimizer):
         """Fit GP model in target space."""
         # Embed observations to target space
         X_target = self._embed_to_target(self.X)
+        target_bounds = self._get_target_bounds()
 
-        # Fit GP in target space
+        # Standardize outputs manually to avoid BoTorch input warnings
+        y_mean = self.y.mean()
+        y_std = self.y.std()
+        if y_std < 1e-6:
+            y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        y_stdized = (self.y - y_mean) / y_std
+
+        # Fit GP in target space with transforms
         self.model = SingleTaskGP(
             train_X=X_target,
-            train_Y=self.y
+            train_Y=y_stdized,
+            input_transform=Normalize(d=self.target_dim, bounds=target_bounds),
+            outcome_transform=None,
         ).to(device=self.device, dtype=self.dtype)
+
+        self._y_mean = y_mean
+        self._y_std = y_std
 
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
         fit_gpytorch_mll(mll)
