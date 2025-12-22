@@ -191,7 +191,7 @@ class SLLMBO(BaseLLMOptimizer):
                 direction=direction,
             )
         return self._system_message
-    
+
     def _format_param_dict(self, x: Tensor) -> Dict[str, float]:
         """
         Convert tensor to parameter dictionary.
@@ -587,12 +587,12 @@ class SLLMBO(BaseLLMOptimizer):
                 # Convert to tensor
                 point = self._parse_param_dict(initial_params)
                 return self.clip_to_bounds(point.unsqueeze(0))
-                
+            
             except Exception:
                 # Fallback to center of bounds
                 center = (self.bounds[0] + self.bounds[1]) / 2
                 return center.unsqueeze(0)
-        
+            
         # Get current best
         if self.maximize:
             best_idx = self.y.argmax()
@@ -609,7 +609,7 @@ class SLLMBO(BaseLLMOptimizer):
             self.iters_no_improvement = 0
         else:
             self.iters_no_improvement += 1
-        
+            
         # Ensure we have best_params initialized
         if self.best_params is None:
             self.best_params = self._format_param_dict(best_x)
@@ -651,7 +651,7 @@ class SLLMBO(BaseLLMOptimizer):
                 point = best_tensor + noise
             else:
                 point = self.random_points(1).squeeze(0)
-        
+                
         return self.clip_to_bounds(point.unsqueeze(0))
     
     def should_stop(self) -> bool:
@@ -662,7 +662,7 @@ class SLLMBO(BaseLLMOptimizer):
             True if no improvement for max_iters_no_improvement iterations.
         """
         return self.iters_no_improvement >= self.max_iters_no_improvement
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """
         Get optimization statistics.

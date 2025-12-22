@@ -95,6 +95,49 @@ class OPRO(BaseLLMOptimizer):
         # History as list of (solution, score, step_index)
         self.solution_history: List[Tuple[List[float], float, int]] = []
         self.current_step = 0
+    
+    def initialize(self, X: Tensor, y: Tensor) -> None:
+        """
+        Initialize the optimizer with observed data.
+        
+        Also populates solution_history for OPRO-specific logic.
+        
+        Args:
+            X: Initial observed points of shape (n, input_dim).
+            y: Initial observed values of shape (n, 1) or (n,).
+        """
+        super().initialize(X, y)
+        
+        # Populate solution_history from initialized data
+        for i in range(X.shape[0]):
+            solution = X[i].tolist()
+            score = y[i].item() if y[i].dim() == 0 else y[i, 0].item()
+            self.solution_history.append((solution, score, self.current_step))
+            self.current_step += 1
+    
+    def update(self, X_new: Tensor, y_new: Tensor) -> None:
+        """
+        Update the optimizer with new observations.
+        
+        Also updates solution_history for OPRO-specific logic.
+        
+        Args:
+            X_new: New observed points.
+            y_new: New observed values.
+        """
+        super().update(X_new, y_new)
+        
+        # Update solution_history
+        X_new = X_new.to(device=self.device, dtype=self.dtype)
+        y_new = y_new.to(device=self.device, dtype=self.dtype)
+        if y_new.dim() == 1:
+            y_new = y_new.unsqueeze(-1)
+            
+        for i in range(X_new.shape[0]):
+            solution = X_new[i].tolist()
+            score = y_new[i, 0].item()
+            self.solution_history.append((solution, score, self.current_step))
+            self.current_step += 1
         
     def _bucketize_score(self, score: float, min_score: float = 0.0, max_score: float = 1.0) -> int:
         """
@@ -237,7 +280,6 @@ Do not include any explanation, only the JSON array.
                 response = self.query_llm(
                     meta_prompt,
                     temperature=self.temperature,
-                    max_tokens=100,
                 )
                 
                 solution = self._parse_solution(response)

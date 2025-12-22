@@ -220,7 +220,7 @@ Do not include any explanation.
         system_msg = "You are an expert optimization assistant."
         
         try:
-            response = self.query_llm(prompt, system_message=system_msg, max_tokens=1000)
+            response = self.query_llm(prompt, system_message=system_msg)
             
             # Parse response
             match = re.search(r'\[\s*\[[\d\s,.\-e\[\]]+\]\s*\]', response, re.DOTALL)
@@ -273,7 +273,7 @@ Format: [[x1, x2, ...], [x1, x2, ...], ...]
 """
         
         try:
-            response = self.query_llm(prompt, max_tokens=500)
+            response = self.query_llm(prompt)
             match = re.search(r'\[\s*\[[\d\s,.\-e\[\]]+\]\s*\]', response, re.DOTALL)
             if match:
                 points = json.loads(match.group())

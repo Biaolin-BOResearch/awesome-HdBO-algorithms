@@ -156,7 +156,7 @@ Do not include any explanations.
             f"a black-box function. {self.task_description}"
         )
         
-        response = self.query_llm(prompt, system_message=system_msg, max_tokens=100)
+        response = self.query_llm(prompt, system_message=system_msg)
         return self.parse_point_from_response(response)
     
     def _predict_with_llm(self, x: Tensor, history_str: str) -> float:
@@ -184,7 +184,7 @@ Return only a single numerical value.
             f"{self.task_description}"
         )
         
-        response = self.query_llm(prompt, system_message=system_msg, max_tokens=20)
+        response = self.query_llm(prompt, system_message=system_msg)
         
         try:
             return float(response.strip())
@@ -401,7 +401,7 @@ Format: [x1, x2, ..., x{self.input_dim}]
         
         candidates = []
         for _ in range(n_candidates):
-            response = self.query_llm(prompt, system_message=system_msg, max_tokens=100)
+            response = self.query_llm(prompt, system_message=system_msg)
             point = self.parse_point_from_response(response)
             if point is not None:
                 candidates.append(point)

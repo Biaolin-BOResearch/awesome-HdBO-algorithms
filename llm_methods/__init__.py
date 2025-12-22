@@ -11,6 +11,7 @@ Methods implemented:
 - SLLMBO: Structured LLM-based optimization with intelligent summarization
 - OPRO: Optimization by PROmpting (LLM as optimizer)
 - BOPRO: BO with LLM proposals
+- VBO: Verbalized Bayesian Optimization (fully LLM-driven with configurable components)
 """
 
 from .base import BaseLLMOptimizer
@@ -39,8 +40,20 @@ from .opro import OPRO, OPROWithExemplars
 # BOPRO - BO with LLM proposals
 from .bopro import BOPRO, BOPROWithRanking
 
+# VBO - Verbalized Bayesian Optimization
+from .vbo import (
+    VBOptimizer,
+    VBOConfig,
+    SurrogateMode,
+    OutputMode,
+    AcquisitionOutputMode,
+    OptimizationMethod,
+    get_all_vbo_configurations,
+    get_vbo_config_name,
+)
 
-__version__ = "1.0.0"
+
+__version__ = "1.1.0"
 
 __all__ = [
     # Base class
@@ -65,6 +78,16 @@ __all__ = [
     # BOPRO
     "BOPRO",
     "BOPROWithRanking",
+    
+    # VBO (Verbalized BO)
+    "VBOptimizer",
+    "VBOConfig",
+    "SurrogateMode",
+    "OutputMode",
+    "AcquisitionOutputMode",
+    "OptimizationMethod",
+    "get_all_vbo_configurations",
+    "get_vbo_config_name",
     
     # Utility functions
     "train_gp",

@@ -150,8 +150,8 @@ class BaseLLMOptimizer(ABC):
         self,
         prompt: str,
         system_message: str = "",
-        max_tokens: int = 1000,
         temperature: float = 0.7,
+        **kwargs,
     ) -> str:
         """
         Query the LLM with a prompt.
@@ -159,8 +159,8 @@ class BaseLLMOptimizer(ABC):
         Args:
             prompt: The user prompt to send to the LLM.
             system_message: Optional system message for context.
-            max_tokens: Maximum tokens in the response.
             temperature: Sampling temperature.
+            **kwargs: Additional parameters (ignored for compatibility).
             
         Returns:
             The LLM's response as a string.
@@ -174,10 +174,10 @@ class BaseLLMOptimizer(ABC):
         messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": prompt})
         
+        # No max_tokens limit - let model generate complete response
         response = self.llm_client.chat.completions.create(
             model=self.model_name,
             messages=messages,
-            max_tokens=max_tokens,
             temperature=temperature,
         )
         

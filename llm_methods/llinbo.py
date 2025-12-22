@@ -223,7 +223,7 @@ class LLAMBOAgent:
         self.llm_client = llm_client
         self.model_name = model_name
         
-    def query_llm(self, prompt: str, max_tokens: int = 4000) -> str:
+    def query_llm(self, prompt: str) -> str:
         """Query the LLM with a prompt."""
         messages = [
             {"role": "system", "content": "You are an AI assistant that helps people find a maximum of a black box function."},
@@ -232,7 +232,6 @@ class LLAMBOAgent:
         response = self.llm_client.chat.completions.create(
             model=self.model_name,
             messages=messages,
-            max_tokens=max_tokens
         )
         return response.choices[0].message.content
     
@@ -310,7 +309,7 @@ class LLAMBOAgent:
         """
         
         try:
-            response = self.query_llm(prompt, max_tokens=50)
+            response = self.query_llm(prompt)
             extracted_value = json.loads(response.strip())
             if isinstance(extracted_value, list) and len(extracted_value) == self.dim:
                 return tuple(float(v) for v in extracted_value)
@@ -358,7 +357,7 @@ class LLAMBOAgent:
         """
         
         try:
-            response = self.query_llm(prompt, max_tokens=10)
+            response = self.query_llm(prompt)
             return float(response.strip())
         except ValueError:
             return None
@@ -451,7 +450,7 @@ class LLAMBOLightAgent:
         self.llm_client = llm_client
         self.model_name = model_name
         
-    def query_llm(self, prompt: str, max_tokens: int = 2000) -> str:
+    def query_llm(self, prompt: str) -> str:
         """Query the LLM with a prompt."""
         messages = [
             {"role": "system", "content": "You are an AI assistant that helps people find a maximum of a black box function."},
@@ -460,7 +459,6 @@ class LLAMBOLightAgent:
         response = self.llm_client.chat.completions.create(
             model=self.model_name,
             messages=messages,
-            max_tokens=max_tokens
         )
         return response.choices[0].message.content
     
@@ -510,7 +508,7 @@ class LLAMBOLightAgent:
         """
         
         while True:
-            llm_output = self.query_llm(prompt, max_tokens=50)
+            llm_output = self.query_llm(prompt)
             try:
                 cand_points = json.loads(llm_output)
                 return cand_points

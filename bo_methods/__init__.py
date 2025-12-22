@@ -38,6 +38,9 @@ from .als_bo import ALSBO, ALSBOMaximize
 # Subspace selection methods
 from .essi_bo import ESSIBO, ESSIBOMaximize
 
+# Bayesian Optimization over Subspaces with ESSI
+from .boss_essi_bo import BOSSESSIBO, BOSSESSIBOMaximize, HammingKernel, OuterGP, InnerBO
+
 # Variable selection methods
 from .vsbo import VSBO
 from .mcts_vs import MCTSVS
@@ -76,6 +79,12 @@ __all__ = [
     # Subspace selection methods
     "ESSIBO",
     "ESSIBOMaximize",
+    # Bayesian Optimization over Subspaces with ESSI
+    "BOSSESSIBO",
+    "BOSSESSIBOMaximize",
+    "HammingKernel",
+    "OuterGP",
+    "InnerBO",
     # Variable selection methods
     "VSBO",
     "MCTSVS",
