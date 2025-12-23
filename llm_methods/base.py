@@ -154,7 +154,10 @@ class BaseLLMOptimizer(ABC):
         **kwargs,
     ) -> str:
         """
-        Query the LLM with a prompt.
+        Query the LLM with a prompt (single-turn conversation).
+        
+        Each call is independent - no conversation history is used.
+        The system_message and prompt are sent as a fresh conversation.
         
         Args:
             prompt: The user prompt to send to the LLM.
@@ -167,11 +170,11 @@ class BaseLLMOptimizer(ABC):
         """
         if self.llm_client is None:
             raise ValueError("LLM client not configured.")
-            
+        
+        # Single-turn conversation: only system + user message, no history
         messages = []
         if system_message:
             messages.append({"role": "system", "content": system_message})
-        messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": prompt})
         
         # No max_tokens limit - let model generate complete response
@@ -183,9 +186,7 @@ class BaseLLMOptimizer(ABC):
         
         assistant_response = response.choices[0].message.content
         
-        # Track conversation
-        self.conversation_history.append({"role": "user", "content": prompt})
-        self.conversation_history.append({"role": "assistant", "content": assistant_response})
+        # Track query count (conversation_history is kept for logging but not used in calls)
         self.llm_query_count += 1
         
         return assistant_response

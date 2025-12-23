@@ -160,14 +160,14 @@ class BOPRO(BaseLLMOptimizer):
         else:
             best_f = self.y.min().item()
         
-        if self.acquisition == "EI":
-            return ExpectedImprovement(model=model, best_f=best_f, maximize=self.maximize)
-        elif self.acquisition == "LOGEI":
+        if self.acquisition == "EI" or self.acquisition == "LOGEI":
+            # Use LogExpectedImprovement for better numerical stability
             return LogExpectedImprovement(model=model, best_f=best_f)
         elif self.acquisition == "UCB":
             return UpperConfidenceBound(model=model, beta=self.ucb_beta)
         else:
-            return ExpectedImprovement(model=model, best_f=best_f, maximize=self.maximize)
+            # Default to LogExpectedImprovement
+            return LogExpectedImprovement(model=model, best_f=best_f)
     
     def _generate_llm_proposals(self) -> List[List[float]]:
         """
@@ -249,7 +249,7 @@ Do not include any explanation.
     
     def warmstart(self, n_points: int, objective_func: Any = None) -> Tensor:
         """
-        Generate initial points using LLM.
+        Generate initial points using LLM with single-turn conversation.
         
         Args:
             n_points: Number of initial points.
@@ -262,18 +262,28 @@ Do not include any explanation.
         bounds_upper = self.bounds[1].tolist()
         direction = "maximize" if self.maximize else "minimize"
         
+        system_message = (
+            f"You are an optimization expert helping to initialize black-box optimization. "
+            f"Your task is to suggest diverse starting points that cover the search space well "
+            f"for a {self.input_dim}-dimensional function optimization problem."
+        )
+        
         prompt = f"""Suggest {n_points} diverse starting points for optimizing a {self.input_dim}-dimensional function.
 
 Task: {self.task_description}
 Goal: {direction} the function.
-Bounds: [{bounds_lower}, {bounds_upper}]
+Search space bounds: [{bounds_lower}, {bounds_upper}]
 
-Return ONLY a JSON array of {n_points} points, each with {self.input_dim} dimensions.
-Format: [[x1, x2, ...], [x1, x2, ...], ...]
-"""
+Requirements:
+- Return exactly {n_points} points
+- Each point should be a {self.input_dim}-dimensional vector
+- Points should be diverse and cover different regions of the search space
+
+Return ONLY a JSON array of {n_points} points, no explanations.
+Format: [[x1, x2, ...], [x1, x2, ...], ...]"""
         
         try:
-            response = self.query_llm(prompt)
+            response = self.query_llm(prompt, system_message=system_message)
             match = re.search(r'\[\s*\[[\d\s,.\-e\[\]]+\]\s*\]', response, re.DOTALL)
             if match:
                 points = json.loads(match.group())

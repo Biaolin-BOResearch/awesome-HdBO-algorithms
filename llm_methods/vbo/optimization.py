@@ -490,11 +490,31 @@ class SingleStartTGA(AcquisitionOptimizer):
         new_x = x + delta
         return self._clip_to_bounds(new_x)
     
-    def _query_llm(self, prompt: str) -> str:
-        """Query LLM."""
+    def _query_llm(self, user_prompt: str, system_prompt: str = None) -> str:
+        """
+        Query the LLM with a single-turn conversation.
+        
+        Args:
+            user_prompt: The user prompt to send.
+            system_prompt: Optional system prompt. If None, uses default.
+            
+        Returns:
+            LLM response string.
+        """
+        if system_prompt is None:
+            system_prompt = (
+                "You are an optimization assistant using textual gradient ascent. "
+                "Your role is to compute gradient directions and refine candidate points "
+                "to maximize the acquisition function in Bayesian optimization."
+            )
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         response = self.llm_client.chat.completions.create(
             model=self.llm_client.model_name,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
         )
         return response.choices[0].message.content
     

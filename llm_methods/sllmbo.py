@@ -238,15 +238,23 @@ class SLLMBO(BaseLLMOptimizer):
         """
         try:
             # First, try to parse the entire response as JSON
-            return json.loads(response)
+            parsed = json.loads(response)
+            if isinstance(parsed, dict):
+                return parsed
+            # If it's a list, try to find a dict in it or wrap it
+            if isinstance(parsed, list) and len(parsed) > 0:
+                if isinstance(parsed[0], dict):
+                    return parsed[0]  # Return first dict
         except json.JSONDecodeError:
             pass
         
-        # Try to extract JSON-like content from the response
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
+        # Try to extract JSON object from the response
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response, re.DOTALL)
         if json_match:
             try:
-                return json.loads(json_match.group())
+                parsed = json.loads(json_match.group())
+                if isinstance(parsed, dict):
+                    return parsed
             except json.JSONDecodeError:
                 pass
         
@@ -281,58 +289,31 @@ class SLLMBO(BaseLLMOptimizer):
         curr_iter: int,
     ) -> str:
         """
-        Call the LLM with the given prompt, handling summarization.
+        Call the LLM with the given prompt (single-turn conversation).
+        
+        Each call is independent - only system message and user message are sent.
+        No conversation history is maintained between calls.
         
         Args:
             user_message: The user prompt to send.
-            curr_iter: Current iteration number.
+            curr_iter: Current iteration number (kept for API compatibility).
             
         Returns:
             LLM response string.
         """
-        # Check if we should summarize
-        should_summarize = (
-            curr_iter > 0 and 
-            curr_iter % self.n_summarize_iter == 0 and 
-            curr_iter != self.initialization_iter
-        )
-        
-        if should_summarize:
-            self._intelligent_summarize()
-        
-        # Build messages
+        # Single-turn conversation: only system + user message
         messages = [
             {"role": "system", "content": self.system_message},
-            *self.conversation_history,
             {"role": "user", "content": user_message},
         ]
         
-        try:
-            response = self.llm_client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-            )
-            assistant_response = response.choices[0].message.content
-        except Exception as e:
-            # Handle context length exceeded by summarizing
-            if "maximum context length" in str(e).lower():
-                self._intelligent_summarize()
-                messages = [
-                    {"role": "system", "content": self.system_message},
-                    *self.conversation_history,
-                    {"role": "user", "content": user_message},
-                ]
-                response = self.llm_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=messages,
-                )
-                assistant_response = response.choices[0].message.content
-            else:
-                raise e
+        response = self.llm_client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+        )
+        assistant_response = response.choices[0].message.content
         
-        # Update conversation history
-        self.conversation_history.append({"role": "user", "content": user_message})
-        self.conversation_history.append({"role": "assistant", "content": assistant_response})
+        # Track query count
         self.llm_query_count += 1
         
         return assistant_response

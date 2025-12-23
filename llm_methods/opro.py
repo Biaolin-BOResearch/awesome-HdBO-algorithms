@@ -269,16 +269,26 @@ Do not include any explanation, only the JSON array.
         """
         candidates = []
         
+        # System message for OPRO optimization
+        direction = "maximize" if self.maximize else "minimize"
+        system_message = (
+            f"You are an optimization expert helping to {direction} a {self.input_dim}-dimensional "
+            f"black-box function. Based on past solution-score pairs, you generate new solutions "
+            f"that are likely to achieve better scores. You understand that solutions with "
+            f"{'higher' if self.maximize else 'lower'} scores are better."
+        )
+        
         for _ in range(n_candidates):
             if len(self.solution_history) == 0:
                 # No history, generate random solution
                 solution = self.random_points(1).squeeze(0).tolist()
             else:
-                # Generate meta-prompt and query LLM
+                # Generate meta-prompt and query LLM with single-turn conversation
                 meta_prompt = self._gen_meta_prompt()
                 
                 response = self.query_llm(
                     meta_prompt,
+                    system_message=system_message,
                     temperature=self.temperature,
                 )
                 

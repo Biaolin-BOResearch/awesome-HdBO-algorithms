@@ -270,11 +270,31 @@ class VBOSurrogateModel(ABC):
         else:
             return f"{x:.4f}" if isinstance(x, float) else str(x)
     
-    def _query_llm(self, prompt: str) -> str:
-        """Query the LLM and return response."""
+    def _query_llm(self, user_prompt: str, system_prompt: str = None) -> str:
+        """
+        Query the LLM with a single-turn conversation.
+        
+        Args:
+            user_prompt: The user prompt to send.
+            system_prompt: Optional system prompt. If None, uses default.
+            
+        Returns:
+            LLM response string.
+        """
+        if system_prompt is None:
+            system_prompt = (
+                "You are a Bayesian optimization surrogate model that predicts function values. "
+                "Based on historical observations, you provide predictions with uncertainty estimates. "
+                "Your predictions should be well-reasoned and consider the patterns in the data."
+            )
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         response = self.llm_client.chat.completions.create(
             model=self.llm_client.model_name,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
         )
         return response.choices[0].message.content
     

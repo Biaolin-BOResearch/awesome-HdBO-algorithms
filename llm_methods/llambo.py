@@ -89,7 +89,7 @@ class LLAMBO(BaseLLMOptimizer):
         
     def warmstart(self, n_points: int, objective_func: Any = None) -> Tensor:
         """
-        Generate initial points using LLM.
+        Generate initial points using LLM with single-turn conversation.
         
         Args:
             n_points: Number of initial points to generate.
@@ -99,21 +99,27 @@ class LLAMBO(BaseLLMOptimizer):
             Tensor of initial points.
         """
         system_msg = (
-            "You are an AI assistant helping with black-box optimization. "
-            f"The goal is to {'maximize' if self.maximize else 'minimize'} "
-            f"a function. {self.task_description}"
+            f"You are an expert optimization assistant helping to initialize black-box optimization. "
+            f"Your goal is to {'maximize' if self.maximize else 'minimize'} an unknown function. "
+            f"You suggest diverse starting points that cover the search space well for efficient exploration. "
+            f"{self.task_description}"
         )
         
-        prompt = f"""
-You are helping to initialize optimization of a black-box function.
-The search space has {self.input_dim} dimensions.
-Bounds: [{self.bounds[0].tolist()}, {self.bounds[1].tolist()}]
+        prompt = f"""Generate {n_points} diverse starting points for optimizing a black-box function.
 
-Suggest {n_points} diverse starting points that would be good for exploring this space.
-Return strictly as a JSON array of {self.input_dim}-dimensional arrays.
-Example format: [[0.1, 0.2], [0.5, 0.6], ...]
-Do not include any explanation, only the JSON array.
-"""
+Search space information:
+- Dimensions: {self.input_dim}
+- Lower bounds: {self.bounds[0].tolist()}
+- Upper bounds: {self.bounds[1].tolist()}
+
+Requirements:
+- Return exactly {n_points} points
+- Each point should be a {self.input_dim}-dimensional vector
+- Points should be diverse and cover different regions of the search space
+- All values must be within the specified bounds
+
+Return ONLY a JSON array of {self.input_dim}-dimensional arrays, no explanations.
+Format: [[x1, x2, ...], [x1, x2, ...], ...]"""
         
         response = self.query_llm(prompt, system_message=system_msg)
         
@@ -131,7 +137,7 @@ Do not include any explanation, only the JSON array.
     
     def _sample_candidate_point(self, history_str: str, target_score: float) -> Optional[Tensor]:
         """
-        Sample a candidate point from LLM.
+        Sample a candidate point from LLM using single-turn conversation.
         
         Args:
             history_str: Formatted history string.
@@ -140,28 +146,33 @@ Do not include any explanation, only the JSON array.
         Returns:
             Candidate point tensor or None.
         """
-        prompt = f"""
-The following are past evaluations of a black-box function:
+        system_msg = (
+            f"You are an expert optimization assistant helping to {'maximize' if self.maximize else 'minimize'} "
+            f"a black-box function. Based on past evaluations, you suggest new points that are likely to "
+            f"achieve a target function value. {self.task_description}"
+        )
+        
+        prompt = f"""Based on the following past evaluations, recommend a new point to evaluate.
+
+Past evaluations of the black-box function:
 {history_str}
 
-The search space bounds are [{self.bounds[0].tolist()}, {self.bounds[1].tolist()}].
-Recommend a new point x that can achieve a function value of {target_score:.6f}.
-Return only a single {self.input_dim}-dimensional numerical vector.
-Format: [x1, x2, ..., x{self.input_dim}]
-Do not include any explanations.
-"""
-        
-        system_msg = (
-            f"You are an AI assistant helping to {'maximize' if self.maximize else 'minimize'} "
-            f"a black-box function. {self.task_description}"
-        )
+Search space bounds:
+- Lower: {self.bounds[0].tolist()}
+- Upper: {self.bounds[1].tolist()}
+
+Target function value to achieve: {target_score:.6f}
+
+Recommend a new point x that can achieve the target function value.
+Return ONLY a single {self.input_dim}-dimensional numerical vector as a JSON array.
+Format: [x1, x2, ..., x{self.input_dim}]"""
         
         response = self.query_llm(prompt, system_message=system_msg)
         return self.parse_point_from_response(response)
     
     def _predict_with_llm(self, x: Tensor, history_str: str) -> float:
         """
-        Predict function value at x using LLM as surrogate.
+        Predict function value at x using LLM as surrogate with single-turn conversation.
         
         Args:
             x: Point to predict.
@@ -170,19 +181,27 @@ Do not include any explanations.
         Returns:
             Predicted function value.
         """
-        prompt = f"""
-The following are past evaluations of a black-box function:
-{history_str}
-
-The search space bounds are [{self.bounds[0].tolist()}, {self.bounds[1].tolist()}].
-Predict the function value at x = {x.tolist()}.
-Return only a single numerical value.
-"""
-        
         system_msg = (
-            f"You are an AI assistant predicting values of a black-box function. "
+            f"You are an expert surrogate model for black-box function prediction. "
+            f"Based on past evaluations, you predict the function value at new points. "
+            f"You analyze patterns in the data to make accurate predictions. "
             f"{self.task_description}"
         )
+        
+        prompt = f"""Based on the following past evaluations, predict the function value at a new point.
+
+Past evaluations of the black-box function:
+{history_str}
+
+Search space bounds:
+- Lower: {self.bounds[0].tolist()}
+- Upper: {self.bounds[1].tolist()}
+
+Point to predict: x = {x.tolist()}
+
+Predict the function value at the given point.
+Return ONLY a single numerical value (floating-point number).
+No explanations, labels, or extra text."""
         
         response = self.query_llm(prompt, system_message=system_msg)
         
@@ -369,7 +388,7 @@ class LLAMBOLight(BaseLLMOptimizer):
         
     def suggest(self, n_candidates: int = 1) -> Tensor:
         """
-        Suggest points using direct LLM prompting.
+        Suggest points using direct LLM prompting with single-turn conversation.
         """
         if self.X is None or self.y is None:
             return self.random_points(n_candidates)
@@ -379,25 +398,30 @@ class LLAMBOLight(BaseLLMOptimizer):
         random.shuffle(history)
         history_str = "\n".join([f"x: {x}, f(x): {y}" for x, y in history])
         
-        prompt = f"""
-The following are past evaluations of a black-box function:
+        system_msg = (
+            f"You are an expert optimization assistant for black-box function optimization. "
+            f"Your goal is to {'maximize' if self.maximize else 'minimize'} an unknown function. "
+            f"You recommend points that balance exploration of unexplored regions and "
+            f"exploitation of known high-performing regions. {self.task_description}"
+        )
+        
+        prompt = f"""Based on the following past evaluations, recommend the next point to evaluate.
+
+Past evaluations of the black-box function:
 {history_str}
 
-The search space bounds are [{self.bounds[0].tolist()}, {self.bounds[1].tolist()}].
+Search space bounds:
+- Lower: {self.bounds[0].tolist()}
+- Upper: {self.bounds[1].tolist()}
 
-Based on the past data, recommend the next point to evaluate that balances:
+Goal: Find the global {'maximum' if self.maximize else 'minimum'}
+
+Your recommendation should balance:
 - Exploration: selecting points in unexplored regions far from evaluated points
 - Exploitation: selecting points close to high-performing evaluations
 
-The goal is to find the global {'maximum' if self.maximize else 'minimum'}.
-Return only a {self.input_dim}-dimensional numerical vector.
-Format: [x1, x2, ..., x{self.input_dim}]
-"""
-        
-        system_msg = (
-            f"You are an AI assistant for black-box optimization. "
-            f"{self.task_description}"
-        )
+Return ONLY a single {self.input_dim}-dimensional numerical vector as a JSON array.
+Format: [x1, x2, ..., x{self.input_dim}]"""
         
         candidates = []
         for _ in range(n_candidates):

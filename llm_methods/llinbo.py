@@ -223,11 +223,27 @@ class LLAMBOAgent:
         self.llm_client = llm_client
         self.model_name = model_name
         
-    def query_llm(self, prompt: str) -> str:
-        """Query the LLM with a prompt."""
+    def query_llm(self, user_prompt: str, system_prompt: str = None) -> str:
+        """
+        Query the LLM with a single-turn conversation.
+        
+        Args:
+            user_prompt: The user prompt to send.
+            system_prompt: Optional system prompt. If None, uses default.
+            
+        Returns:
+            LLM response string.
+        """
+        if system_prompt is None:
+            system_prompt = (
+                "You are an AI assistant specialized in black-box optimization. "
+                "Your goal is to help find the maximum of an unknown function by suggesting "
+                "promising points to evaluate based on past observations."
+            )
+        
         messages = [
-            {"role": "system", "content": "You are an AI assistant that helps people find a maximum of a black box function."},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ]
         response = self.llm_client.chat.completions.create(
             model=self.model_name,
@@ -249,14 +265,27 @@ class LLAMBOAgent:
         if objective_function is None:
             raise ValueError("Objective function must be provided for warm-starting.")
         
-        prompt = f"""
-        You are assisting me with maximize a black-box function, which is {self.func_desc}.
-        Suggest {num_warmstart} promising starting points for this task in the range [0, 1]^{self.dim}.
-        Return the points strictly in JSON format as a list of {self.dim}-dimensional vectors. Do not include any explanations, labels, formatting, or extra text. The response must be strictly valid JSON.
-        """
+        system_prompt = (
+            f"You are an AI assistant specialized in black-box optimization. "
+            f"You are helping to initialize optimization of a black-box function: {self.func_desc}. "
+            f"Your task is to suggest diverse starting points that cover the search space well."
+        )
+        
+        user_prompt = f"""Suggest {num_warmstart} promising starting points for maximizing a black-box function.
+
+Function description: {self.func_desc}
+Search space: [0, 1]^{self.dim} (each dimension ranges from 0 to 1)
+
+Requirements:
+- Return exactly {num_warmstart} points
+- Each point should be a {self.dim}-dimensional vector
+- Points should be diverse and cover different regions of the search space
+- Return ONLY a JSON array, no explanations
+
+Format: [[x1, x2, ...], [x1, x2, ...], ...]"""
         
         while True:
-            llm_output = self.query_llm(prompt)
+            llm_output = self.query_llm(user_prompt, system_prompt)
             try:
                 warmstart_points = json.loads(llm_output)
                 if isinstance(warmstart_points, list) and all(
@@ -298,18 +327,29 @@ class LLAMBOAgent:
         return candidates
     
     def _sample_one_candidate(self, history_str: str, target_score: float) -> Optional[tuple]:
-        """Sample a single candidate point from LLM."""
-        prompt = f"""
-        The following are past evaluations of a black-box function. The function is {self.func_desc}.
-        {history_str}
-        The allowable ranges for x is [0, 1]^{self.dim}.
-        Recommend a new x that can achieve the function value of {target_score}.
-        Return only a single {self.dim}-dimensional numerical vector with the highest possible precision. 
-        Do not include any explanations, labels, formatting, or extra text. The response must be strictly valid JSON.
-        """
+        """Sample a single candidate point from LLM using single-turn conversation."""
+        system_prompt = (
+            f"You are an AI assistant specialized in black-box optimization. "
+            f"You are helping to maximize a black-box function: {self.func_desc}. "
+            f"Based on past evaluations, suggest a new point that could achieve a target score."
+        )
+        
+        user_prompt = f"""Based on the following past evaluations of a black-box function, recommend a new point.
+
+Function description: {self.func_desc}
+
+Past evaluations:
+{history_str}
+
+Search space: [0, 1]^{self.dim}
+Target function value to achieve: {target_score}
+
+Recommend a new x that can achieve the target function value.
+Return ONLY a single {self.dim}-dimensional numerical vector as a JSON array.
+Format: [x1, x2, ..., x{self.dim}]"""
         
         try:
-            response = self.query_llm(prompt)
+            response = self.query_llm(user_prompt, system_prompt)
             extracted_value = json.loads(response.strip())
             if isinstance(extracted_value, list) and len(extracted_value) == self.dim:
                 return tuple(float(v) for v in extracted_value)
@@ -347,17 +387,28 @@ class LLAMBOAgent:
                 self.grid_results[tuple(x)] = (mean, std)
     
     def _predict_llm_score(self, x: tuple, history_str: str) -> Optional[float]:
-        """Predict function value at x using LLM."""
-        prompt = f"""
-        The following are past evaluations of a black-box function, which is {self.func_desc}.    
-        {history_str}     
-        The allowable ranges for x is [0, 1]^{self.dim}.
-        Predict the function value at x = {x}.
-        Return only a single numerical value. Do not include any explanations, labels, formatting, or extra text. The response must be strictly a valid floating-point number.
-        """
+        """Predict function value at x using LLM with single-turn conversation."""
+        system_prompt = (
+            f"You are an AI assistant specialized in black-box function prediction. "
+            f"You are helping to predict values of a black-box function: {self.func_desc}. "
+            f"Based on past evaluations, predict the function value at a new point."
+        )
+        
+        user_prompt = f"""Based on the following past evaluations, predict the function value at a new point.
+
+Function description: {self.func_desc}
+
+Past evaluations:
+{history_str}
+
+Search space: [0, 1]^{self.dim}
+
+Predict the function value at x = {x}.
+Return ONLY a single numerical value (floating-point number).
+No explanations, labels, or extra text."""
         
         try:
-            response = self.query_llm(prompt)
+            response = self.query_llm(user_prompt, system_prompt)
             return float(response.strip())
         except ValueError:
             return None
@@ -424,6 +475,9 @@ class LLAMBOLightAgent:
     A simplified version that directly generates candidates without
     explicit surrogate modeling, relying on the LLM's internal
     understanding of exploration-exploitation trade-off.
+    
+    All LLM interactions use single-turn conversations with clear
+    system prompts and user prompts.
     """
     
     def __init__(
@@ -450,11 +504,27 @@ class LLAMBOLightAgent:
         self.llm_client = llm_client
         self.model_name = model_name
         
-    def query_llm(self, prompt: str) -> str:
-        """Query the LLM with a prompt."""
+    def query_llm(self, user_prompt: str, system_prompt: str = None) -> str:
+        """
+        Query the LLM with a single-turn conversation.
+        
+        Args:
+            user_prompt: The user prompt to send.
+            system_prompt: Optional system prompt. If None, uses default.
+            
+        Returns:
+            LLM response string.
+        """
+        if system_prompt is None:
+            system_prompt = (
+                "You are an AI assistant specialized in black-box optimization. "
+                "Your goal is to help find the maximum of an unknown function by suggesting "
+                "promising points to evaluate based on past observations."
+            )
+        
         messages = [
-            {"role": "system", "content": "You are an AI assistant that helps people find a maximum of a black box function."},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ]
         response = self.llm_client.chat.completions.create(
             model=self.model_name,
@@ -464,16 +534,29 @@ class LLAMBOLightAgent:
     
     def llm_warmstarting(self, num_warmstart: int, objective_function: Any) -> List[Tuple[tuple, float]]:
         """
-        Generate initial points using LLM warmstarting.
+        Generate initial points using LLM warmstarting with single-turn conversation.
         """
-        prompt = f"""
-        You are assisting me with maximize a black-box function, which is {self.func_desc}.
-        Suggest {num_warmstart} promising starting points for this task in the range [0, 1]^{self.dim}.
-        Return the points strictly in JSON format as a list of {self.dim}-dimensional vectors. Do not include any explanations, labels, formatting, or extra text. The response must be strictly valid JSON.
-        """
+        system_prompt = (
+            f"You are an AI assistant specialized in black-box optimization. "
+            f"You are helping to initialize optimization of a black-box function: {self.func_desc}. "
+            f"Your task is to suggest diverse starting points that cover the search space well."
+        )
+        
+        user_prompt = f"""Suggest {num_warmstart} promising starting points for maximizing a black-box function.
+
+Function description: {self.func_desc}
+Search space: [0, 1]^{self.dim} (each dimension ranges from 0 to 1)
+
+Requirements:
+- Return exactly {num_warmstart} points
+- Each point should be a {self.dim}-dimensional vector
+- Points should be diverse and cover different regions of the search space
+- Return ONLY a JSON array, no explanations
+
+Format: [[x1, x2, ...], [x1, x2, ...], ...]"""
         
         while True:
-            llm_output = self.query_llm(prompt)
+            llm_output = self.query_llm(user_prompt, system_prompt)
             try:
                 warmstart_points = json.loads(llm_output)
                 if isinstance(warmstart_points, list) and all(
@@ -488,6 +571,7 @@ class LLAMBOLightAgent:
     def sample_candidate_points(self) -> List[float]:
         """
         Sample a candidate point that balances exploration and exploitation.
+        Uses single-turn conversation.
         
         Returns:
             Candidate point as list.
@@ -496,19 +580,32 @@ class LLAMBOLightAgent:
         random.shuffle(shuffled_history)
         
         history_str = "\n".join([f"x: {x}, f(x): {y}" for x, y in shuffled_history])
-        prompt = f"""
-        The following are past evaluations of a black-box function, which is {self.func_desc}.
-        {history_str}
-        The allowable ranges for x is [0, 1]^{self.dim}.
-        Based on the past data, recommend the next point to evaluate that balances exploration and exploitation:
-        - Exploration means selecting a point in an unexplored or less-sampled region that is far from the previously evaluated points.
-        - Exploitation means selecting a point close to the previously high-performing evaluations.
-        The goal is to eventually find the global maximum. Return only a single {self.dim}-dimensional numerical vector with high precision. The response must be valid JSON with no explanations, labels, or extra formatting.
-        Return only a single {self.dim}-dimensional numerical vector with the highest possible precision. Do not include any explanations, labels, formatting, or extra text.
-        """
+        
+        system_prompt = (
+            f"You are an AI assistant specialized in black-box optimization. "
+            f"You are helping to maximize a black-box function: {self.func_desc}. "
+            f"Your task is to recommend the next point to evaluate that balances exploration and exploitation."
+        )
+        
+        user_prompt = f"""Based on the following past evaluations, recommend the next point to evaluate.
+
+Function description: {self.func_desc}
+
+Past evaluations:
+{history_str}
+
+Search space: [0, 1]^{self.dim}
+
+Your recommendation should balance:
+- Exploration: selecting points in unexplored regions far from evaluated points
+- Exploitation: selecting points close to high-performing evaluations
+
+The goal is to find the global maximum.
+Return ONLY a single {self.dim}-dimensional numerical vector as a JSON array.
+Format: [x1, x2, ..., x{self.dim}]"""
         
         while True:
-            llm_output = self.query_llm(prompt)
+            llm_output = self.query_llm(user_prompt, system_prompt)
             try:
                 cand_points = json.loads(llm_output)
                 return cand_points
