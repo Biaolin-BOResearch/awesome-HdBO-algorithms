@@ -159,6 +159,9 @@ class BaseLLMOptimizer(ABC):
         Each call is independent - no conversation history is used.
         The system_message and prompt are sent as a fresh conversation.
         
+        For reasoning models (e.g., Thinking models), the thinking process
+        wrapped in <think> tags is automatically stripped from the response.
+        
         Args:
             prompt: The user prompt to send to the LLM.
             system_message: Optional system message for context.
@@ -166,7 +169,7 @@ class BaseLLMOptimizer(ABC):
             **kwargs: Additional parameters (ignored for compatibility).
             
         Returns:
-            The LLM's response as a string.
+            The LLM's response as a string (with thinking content stripped).
         """
         if self.llm_client is None:
             raise ValueError("LLM client not configured.")
@@ -186,10 +189,49 @@ class BaseLLMOptimizer(ABC):
         
         assistant_response = response.choices[0].message.content
         
+        # Strip thinking content for reasoning models
+        assistant_response = self._strip_thinking_content(assistant_response)
+        
         # Track query count (conversation_history is kept for logging but not used in calls)
         self.llm_query_count += 1
         
         return assistant_response
+    
+    def _strip_thinking_content(self, response: str) -> str:
+        """
+        Strip thinking/reasoning content from model response.
+        
+        Reasoning models (like Qwen-Thinking) wrap their reasoning process
+        in <think>...</think> tags. This method extracts only the final answer.
+        
+        Args:
+            response: Raw LLM response string.
+            
+        Returns:
+            Response with thinking content removed.
+        """
+        import re
+        
+        if response is None:
+            return ""
+        
+        # Pattern to match <think>...</think> blocks (including multiline)
+        # Also handles variations like <thinking>...</thinking>
+        patterns = [
+            r'<think>.*?</think>',
+            r'<thinking>.*?</thinking>',
+            r'<thought>.*?</thought>',
+            r'<reasoning>.*?</reasoning>',
+        ]
+        
+        result = response
+        for pattern in patterns:
+            result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        result = result.strip()
+        
+        return result
     
     def format_observations_for_prompt(
         self,

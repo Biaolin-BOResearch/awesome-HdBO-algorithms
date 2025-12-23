@@ -494,12 +494,15 @@ class SingleStartTGA(AcquisitionOptimizer):
         """
         Query the LLM with a single-turn conversation.
         
+        For reasoning models (e.g., Thinking models), the thinking process
+        wrapped in <think> tags is automatically stripped from the response.
+        
         Args:
             user_prompt: The user prompt to send.
             system_prompt: Optional system prompt. If None, uses default.
             
         Returns:
-            LLM response string.
+            LLM response string (with thinking content stripped).
         """
         if system_prompt is None:
             system_prompt = (
@@ -516,7 +519,24 @@ class SingleStartTGA(AcquisitionOptimizer):
             model=self.llm_client.model_name,
             messages=messages,
         )
-        return response.choices[0].message.content
+        result = response.choices[0].message.content
+        return self._strip_thinking_content(result)
+    
+    def _strip_thinking_content(self, response: str) -> str:
+        """Strip <think>...</think> and similar tags from reasoning model output."""
+        import re
+        if response is None:
+            return ""
+        patterns = [
+            r'<think>.*?</think>',
+            r'<thinking>.*?</thinking>',
+            r'<thought>.*?</thought>',
+            r'<reasoning>.*?</reasoning>',
+        ]
+        result = response
+        for pattern in patterns:
+            result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
+        return result.strip()
     
     def optimize(
         self,
