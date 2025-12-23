@@ -83,6 +83,10 @@ class BaseLLMOptimizer(ABC):
         self.llm_query_cost = 0.0
         self.conversation_history: List[Dict[str, str]] = []
         
+        # Reasoning content tracking (for reasoning models like Thinking)
+        self.last_reasoning_content: Optional[str] = None
+        self.reasoning_history: List[Dict[str, Any]] = []
+        
     def initialize(self, X: Tensor, y: Tensor) -> None:
         """
         Initialize the optimizer with observed data.
@@ -187,51 +191,87 @@ class BaseLLMOptimizer(ABC):
             temperature=temperature,
         )
         
-        assistant_response = response.choices[0].message.content
+        raw_response = response.choices[0].message.content
         
-        # Strip thinking content for reasoning models
-        assistant_response = self._strip_thinking_content(assistant_response)
+        # Extract and store reasoning content, then strip it from response
+        reasoning_content, assistant_response = self._extract_and_strip_thinking(raw_response)
         
-        # Track query count (conversation_history is kept for logging but not used in calls)
+        # Store reasoning content for logging
+        self.last_reasoning_content = reasoning_content
+        if reasoning_content:
+            self.reasoning_history.append({
+                "query_index": self.llm_query_count,
+                "reasoning": reasoning_content,
+                "response": assistant_response,
+                "raw_response": raw_response,
+            })
+        
+        # Track query count
         self.llm_query_count += 1
         
         return assistant_response
     
-    def _strip_thinking_content(self, response: str) -> str:
+    def _extract_and_strip_thinking(self, response: str) -> tuple:
         """
-        Strip thinking/reasoning content from model response.
+        Extract thinking/reasoning content and strip it from model response.
         
         Reasoning models (like Qwen-Thinking) wrap their reasoning process
-        in <think>...</think> tags. This method extracts only the final answer.
+        in <think>...</think> tags. This method extracts both the reasoning
+        content and the final answer separately.
         
         Args:
             response: Raw LLM response string.
             
         Returns:
-            Response with thinking content removed.
+            Tuple of (reasoning_content, stripped_response).
+            reasoning_content is None if no thinking tags found.
         """
         import re
         
         if response is None:
-            return ""
+            return None, ""
         
-        # Pattern to match <think>...</think> blocks (including multiline)
-        # Also handles variations like <thinking>...</thinking>
+        # Patterns to match thinking blocks (including multiline)
         patterns = [
-            r'<think>.*?</think>',
-            r'<thinking>.*?</thinking>',
-            r'<thought>.*?</thought>',
-            r'<reasoning>.*?</reasoning>',
+            (r'<think>(.*?)</think>', 'think'),
+            (r'<thinking>(.*?)</thinking>', 'thinking'),
+            (r'<thought>(.*?)</thought>', 'thought'),
+            (r'<reasoning>(.*?)</reasoning>', 'reasoning'),
         ]
         
+        reasoning_content = None
         result = response
-        for pattern in patterns:
-            result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
         
-        # Clean up extra whitespace
+        for pattern, tag_name in patterns:
+            matches = re.findall(pattern, result, flags=re.DOTALL | re.IGNORECASE)
+            if matches:
+                # Combine all reasoning blocks
+                if reasoning_content is None:
+                    reasoning_content = ""
+                for match in matches:
+                    reasoning_content += match.strip() + "\n"
+                # Remove the tags from response
+                result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Clean up
         result = result.strip()
+        if reasoning_content:
+            reasoning_content = reasoning_content.strip()
         
-        return result
+        return reasoning_content, result
+    
+    def get_last_reasoning(self) -> Optional[str]:
+        """Get the reasoning content from the last LLM query."""
+        return self.last_reasoning_content
+    
+    def get_reasoning_history(self) -> List[Dict[str, Any]]:
+        """Get all reasoning content history."""
+        return self.reasoning_history.copy()
+    
+    def clear_reasoning_history(self) -> None:
+        """Clear reasoning history."""
+        self.reasoning_history = []
+        self.last_reasoning_content = None
     
     def format_observations_for_prompt(
         self,

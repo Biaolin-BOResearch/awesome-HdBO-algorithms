@@ -163,6 +163,10 @@ class SLLMBO(BaseLLMOptimizer):
         # System message (initialized lazily)
         self._system_message: Optional[str] = None
         
+        # Reasoning content tracking (for reasoning models)
+        self.last_reasoning_content: Optional[str] = None
+        self.reasoning_history: List[Dict[str, Any]] = []
+        
     def _init_param_ranges(self) -> Dict[str, Dict[str, Any]]:
         """
         Initialize parameter ranges from bounds.
@@ -295,7 +299,7 @@ class SLLMBO(BaseLLMOptimizer):
         No conversation history is maintained between calls.
         
         For reasoning models (e.g., Thinking models), the thinking process
-        wrapped in <think> tags is automatically stripped from the response.
+        wrapped in <think> tags is automatically extracted and stored separately.
         
         Args:
             user_message: The user prompt to send.
@@ -314,31 +318,70 @@ class SLLMBO(BaseLLMOptimizer):
             model=self.model_name,
             messages=messages,
         )
-        assistant_response = response.choices[0].message.content
+        raw_response = response.choices[0].message.content
         
-        # Strip thinking content for reasoning models
-        assistant_response = self._strip_thinking_content(assistant_response)
+        # Extract and store reasoning content, then strip it from response
+        reasoning_content, assistant_response = self._extract_and_strip_thinking(raw_response)
+        
+        # Store reasoning content for logging
+        self.last_reasoning_content = reasoning_content
+        if reasoning_content:
+            self.reasoning_history.append({
+                "query_index": self.llm_query_count,
+                "iteration": curr_iter,
+                "reasoning": reasoning_content,
+                "response": assistant_response,
+                "raw_response": raw_response,
+            })
         
         # Track query count
         self.llm_query_count += 1
         
         return assistant_response
     
-    def _strip_thinking_content(self, response: str) -> str:
-        """Strip <think>...</think> and similar tags from reasoning model output."""
+    def _extract_and_strip_thinking(self, response: str) -> tuple:
+        """
+        Extract and strip <think>...</think> tags from reasoning model output.
+        
+        Returns:
+            Tuple of (reasoning_content, stripped_response).
+        """
         import re
         if response is None:
-            return ""
+            return None, ""
+        
         patterns = [
-            r'<think>.*?</think>',
-            r'<thinking>.*?</thinking>',
-            r'<thought>.*?</thought>',
-            r'<reasoning>.*?</reasoning>',
+            (r'<think>(.*?)</think>', 'think'),
+            (r'<thinking>(.*?)</thinking>', 'thinking'),
+            (r'<thought>(.*?)</thought>', 'thought'),
+            (r'<reasoning>(.*?)</reasoning>', 'reasoning'),
         ]
+        
+        reasoning_content = None
         result = response
-        for pattern in patterns:
-            result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
-        return result.strip()
+        
+        for pattern, tag_name in patterns:
+            matches = re.findall(pattern, result, flags=re.DOTALL | re.IGNORECASE)
+            if matches:
+                if reasoning_content is None:
+                    reasoning_content = ""
+                for match in matches:
+                    reasoning_content += match.strip() + "\n"
+                result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
+        
+        result = result.strip()
+        if reasoning_content:
+            reasoning_content = reasoning_content.strip()
+        
+        return reasoning_content, result
+    
+    def get_last_reasoning(self) -> Optional[str]:
+        """Get the reasoning content from the last LLM query."""
+        return self.last_reasoning_content
+    
+    def get_reasoning_history(self) -> List[Dict[str, Any]]:
+        """Get all reasoning content history."""
+        return self.reasoning_history.copy()
     
     def _intelligent_summarize(self) -> None:
         """

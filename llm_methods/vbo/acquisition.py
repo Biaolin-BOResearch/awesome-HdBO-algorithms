@@ -208,6 +208,11 @@ class VBOAcquisitionFunction:
         # Tracking
         self.n_evaluations = 0
         self.evaluation_history: List[AcquisitionEvaluation] = []
+        
+        # Reasoning content tracking (for reasoning models)
+        self.last_reasoning_content: Optional[str] = None
+        self.reasoning_history: List[Dict[str, Any]] = []
+        self.llm_query_count = 0
     
     def evaluate(
         self,
@@ -347,7 +352,7 @@ class VBOAcquisitionFunction:
         Query the LLM with a single-turn conversation.
         
         For reasoning models (e.g., Thinking models), the thinking process
-        wrapped in <think> tags is automatically stripped from the response.
+        wrapped in <think> tags is extracted and stored separately.
         
         Args:
             user_prompt: The user prompt to send.
@@ -371,24 +376,65 @@ class VBOAcquisitionFunction:
             model=self.llm_client.model_name,
             messages=messages,
         )
-        result = response.choices[0].message.content
-        return self._strip_thinking_content(result)
+        raw_response = response.choices[0].message.content
+        
+        # Extract and store reasoning content
+        reasoning_content, result = self._extract_and_strip_thinking(raw_response)
+        self.last_reasoning_content = reasoning_content
+        if reasoning_content:
+            self.reasoning_history.append({
+                "query_index": self.llm_query_count,
+                "reasoning": reasoning_content,
+                "response": result,
+                "raw_response": raw_response,
+            })
+        
+        self.llm_query_count += 1
+        return result
     
-    def _strip_thinking_content(self, response: str) -> str:
-        """Strip <think>...</think> and similar tags from reasoning model output."""
+    def _extract_and_strip_thinking(self, response: str) -> tuple:
+        """
+        Extract and strip <think>...</think> tags from reasoning model output.
+        
+        Returns:
+            Tuple of (reasoning_content, stripped_response).
+        """
         import re
         if response is None:
-            return ""
+            return None, ""
+        
         patterns = [
-            r'<think>.*?</think>',
-            r'<thinking>.*?</thinking>',
-            r'<thought>.*?</thought>',
-            r'<reasoning>.*?</reasoning>',
+            (r'<think>(.*?)</think>', 'think'),
+            (r'<thinking>(.*?)</thinking>', 'thinking'),
+            (r'<thought>(.*?)</thought>', 'thought'),
+            (r'<reasoning>(.*?)</reasoning>', 'reasoning'),
         ]
+        
+        reasoning_content = None
         result = response
-        for pattern in patterns:
-            result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
-        return result.strip()
+        
+        for pattern, tag_name in patterns:
+            matches = re.findall(pattern, result, flags=re.DOTALL | re.IGNORECASE)
+            if matches:
+                if reasoning_content is None:
+                    reasoning_content = ""
+                for match in matches:
+                    reasoning_content += match.strip() + "\n"
+                result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
+        
+        result = result.strip()
+        if reasoning_content:
+            reasoning_content = reasoning_content.strip()
+        
+        return reasoning_content, result
+    
+    def get_last_reasoning(self) -> Optional[str]:
+        """Get the reasoning content from the last LLM query."""
+        return self.last_reasoning_content
+    
+    def get_reasoning_history(self) -> List[Dict[str, Any]]:
+        """Get all reasoning content history."""
+        return self.reasoning_history.copy()
     
     def _parse_evaluation(self, response: str, x: Any) -> AcquisitionEvaluation:
         """Parse LLM response into AcquisitionEvaluation."""
