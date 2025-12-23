@@ -350,10 +350,21 @@ Format: [x1, x2, ..., x{self.dim}]"""
         
         try:
             response = self.query_llm(user_prompt, system_prompt)
-            extracted_value = json.loads(response.strip())
+            
+            # Try to extract JSON array from the response
+            import re
+            match = re.search(r'\[[\d\s,.\-e]+\]', response)
+            if match:
+                extracted_value = json.loads(match.group())
+            else:
+                extracted_value = json.loads(response.strip())
+            
+            # Validate: must be a list of numbers with correct dimension
             if isinstance(extracted_value, list) and len(extracted_value) == self.dim:
-                return tuple(float(v) for v in extracted_value)
-        except (ValueError, json.JSONDecodeError):
+                # Ensure all elements are numbers (not dicts or other types)
+                if all(isinstance(x, (int, float)) for x in extracted_value):
+                    return tuple(float(v) for v in extracted_value)
+        except (ValueError, json.JSONDecodeError, TypeError):
             pass
         return None
     
@@ -574,7 +585,7 @@ Format: [[x1, x2, ...], [x1, x2, ...], ...]"""
         Uses single-turn conversation.
         
         Returns:
-            Candidate point as list.
+            Candidate point as list of floats.
         """
         shuffled_history = self.history.copy()
         random.shuffle(shuffled_history)
@@ -604,14 +615,33 @@ The goal is to find the global maximum.
 Return ONLY a single {self.dim}-dimensional numerical vector as a JSON array.
 Format: [x1, x2, ..., x{self.dim}]"""
         
-        while True:
+        max_retries = 5
+        for attempt in range(max_retries):
             llm_output = self.query_llm(user_prompt, system_prompt)
             try:
-                cand_points = json.loads(llm_output)
-                return cand_points
+                # Try to extract JSON array from the response
+                import re
+                # Look for array pattern in the response
+                match = re.search(r'\[[\d\s,.\-e]+\]', llm_output)
+                if match:
+                    cand_points = json.loads(match.group())
+                else:
+                    cand_points = json.loads(llm_output)
+                
+                # Validate: must be a list of numbers with correct dimension
+                if isinstance(cand_points, list) and len(cand_points) == self.dim:
+                    # Ensure all elements are numbers (not dicts or other types)
+                    if all(isinstance(x, (int, float)) for x in cand_points):
+                        return [float(x) for x in cand_points]
+                
+                print(f"LLM returned invalid format (attempt {attempt+1}): {type(cand_points)}")
             except json.JSONDecodeError:
-                print("LLM candidate response could not be parsed! Retrying...")
+                print(f"LLM candidate response could not be parsed (attempt {attempt+1})!")
                 continue
+        
+        # Fallback: return random point in [0, 1]^dim
+        print("Max retries reached, returning random point")
+        return [random.random() for _ in range(self.dim)]
 
 
 # ============================================================================
