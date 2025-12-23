@@ -294,12 +294,15 @@ class SLLMBO(BaseLLMOptimizer):
         Each call is independent - only system message and user message are sent.
         No conversation history is maintained between calls.
         
+        For reasoning models (e.g., Thinking models), the thinking process
+        wrapped in <think> tags is automatically stripped from the response.
+        
         Args:
             user_message: The user prompt to send.
             curr_iter: Current iteration number (kept for API compatibility).
             
         Returns:
-            LLM response string.
+            LLM response string (with thinking content stripped).
         """
         # Single-turn conversation: only system + user message
         messages = [
@@ -313,10 +316,29 @@ class SLLMBO(BaseLLMOptimizer):
         )
         assistant_response = response.choices[0].message.content
         
+        # Strip thinking content for reasoning models
+        assistant_response = self._strip_thinking_content(assistant_response)
+        
         # Track query count
         self.llm_query_count += 1
         
         return assistant_response
+    
+    def _strip_thinking_content(self, response: str) -> str:
+        """Strip <think>...</think> and similar tags from reasoning model output."""
+        import re
+        if response is None:
+            return ""
+        patterns = [
+            r'<think>.*?</think>',
+            r'<thinking>.*?</thinking>',
+            r'<thought>.*?</thought>',
+            r'<reasoning>.*?</reasoning>',
+        ]
+        result = response
+        for pattern in patterns:
+            result = re.sub(pattern, '', result, flags=re.DOTALL | re.IGNORECASE)
+        return result.strip()
     
     def _intelligent_summarize(self) -> None:
         """
