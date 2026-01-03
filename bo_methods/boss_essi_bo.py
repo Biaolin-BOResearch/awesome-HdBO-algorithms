@@ -238,9 +238,14 @@ class InnerBO:
         """Update Y mean and std for standardization."""
         if self.train_y.numel() > 0:
             self._y_mean = self.train_y.mean()
-            self._y_std = self.train_y.std()
-            if self._y_std < 1e-6:
+            # Handle single observation case: std() returns NaN for single element
+            if self.train_y.numel() < 2:
                 self._y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+            else:
+                self._y_std = self.train_y.std()
+                # Check for NaN or very small std
+                if torch.isnan(self._y_std) or self._y_std < 1e-6:
+                    self._y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
                 
     def _standardize_y(self, y: Tensor) -> Tensor:
         """Standardize y to mean=0, std=1."""

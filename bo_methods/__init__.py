@@ -40,6 +40,13 @@ from .essi_bo import ESSIBO, ESSIBOMaximize
 
 # Bayesian Optimization over Subspaces with ESSI
 from .boss_essi_bo import BOSSESSIBO, BOSSESSIBOMaximize, HammingKernel, OuterGP, InnerBO
+from .boss_essi_bo_v2 import BOSSESSIBO_V2, BOSSESSIBO_V2_Maximize
+
+# Bi-level and Adaptive-Sketch HeSBO variants
+from .bi_hesbo import BiHeSBO, BiHeSBOMaximize
+from .bi_hesbo_v2 import BiHeSBO_V2, BiHeSBO_V2_Maximize
+from .as_hesbo import ASHeSBO, ASHeSBOMaximize
+from .as_hesbo_v2 import ASHeSBO_V2, ASHeSBO_V2_Maximize
 
 # Variable selection methods
 from .vsbo import VSBO
@@ -82,9 +89,20 @@ __all__ = [
     # Bayesian Optimization over Subspaces with ESSI
     "BOSSESSIBO",
     "BOSSESSIBOMaximize",
+    "BOSSESSIBO_V2",
+    "BOSSESSIBO_V2_Maximize",
     "HammingKernel",
     "OuterGP",
     "InnerBO",
+    # Bi-level and Adaptive-Sketch HeSBO variants
+    "BiHeSBO",
+    "BiHeSBOMaximize",
+    "BiHeSBO_V2",
+    "BiHeSBO_V2_Maximize",
+    "ASHeSBO",
+    "ASHeSBOMaximize",
+    "ASHeSBO_V2",
+    "ASHeSBO_V2_Maximize",
     # Variable selection methods
     "VSBO",
     "MCTSVS",

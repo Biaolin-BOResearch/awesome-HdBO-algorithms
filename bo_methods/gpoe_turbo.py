@@ -236,9 +236,14 @@ class GPOETRBO(BaseOptimizer):
 
         # Standardize targets
         train_y_mean = self.train_y.mean()
-        train_y_std = self.train_y.std()
-        if train_y_std < 1e-8:
+        # Handle single observation case: std() returns NaN for single element
+        if self.train_y.numel() < 2:
             train_y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
+        else:
+            train_y_std = self.train_y.std()
+            # Check for NaN or very small std
+            if torch.isnan(train_y_std) or train_y_std < 1e-8:
+                train_y_std = torch.tensor(1.0, device=self.device, dtype=self.dtype)
         train_y_normalized = (self.train_y - train_y_mean) / train_y_std
 
         # Get best point (center of trust region)
